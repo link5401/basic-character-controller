@@ -8,5 +8,6 @@ public class PlayerAnimation
         public string WalkBack = "Walk Backward";
         public string WalkLeft = "Walk Left";
         public string WalkRight = "Walk Right";
+        public string Run = "Run";
     }
 }
