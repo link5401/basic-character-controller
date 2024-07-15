@@ -2,59 +2,55 @@ using System.Collections;
 using System.Collections.Generic;
 using DG.Tweening;
 using UnityEngine;
-using UnityEngine.UIElements.Experimental;
+using UnityEngine.TextCore.Text;
 
-[RequireComponent(typeof(PlayerControls), typeof(CharacterController))]
+[RequireComponent(typeof(PlayerControls), typeof(CharacterController), typeof(Rigidbody))]
 public class PlayerMovement : AnimationBrain
 {
     // Start is called before the first frame update
     private CharacterController m_CharacterController;
     private PlayerControls m_PlayerControls;
+    private Rigidbody m_Rigidbody;
     public float m_MovementSpeed = 2f;
     public float m_RunMultiplier = 2f;
     public Transform m_MainCameraTransform;
-
-    //Variables received from callbacks
-    //movement
     public Vector3 m_AppliedMovement;
+    public bool IsJumping = false;
+    private float m_JumpHeight = 2.0f;
+    private float m_GravityValue = -9.81f;
     void Awake()
     {
         m_PlayerControls = GetComponent<PlayerControls>();
         m_CharacterController = GetComponent<CharacterController>();
         m_Animator = GetComponent<Animator>();
+        m_Rigidbody = GetComponent<Rigidbody>();
         m_MainCameraTransform = GameObject.Find("Main Camera").transform;
         Cursor.lockState = CursorLockMode.Locked;
-        StartCoroutine(MoveUpdate());
     }
     void Update()
     {
-        //GravityUpdate();
-        //JumpUpdate();
+        AnimationUpdate();
     }
-
-
-
-
+    void FixedUpdate()
+    {
+        JumpUpdate();
+        MoveUpdate();
+    }
     /// <summary>
     /// The MoveUpdate function updates the movement of an object based on user input and applies
     /// animations.
     /// </summary>
-    private IEnumerator MoveUpdate()
+    private void MoveUpdate()
     {
-        while (true)
+        HandleMovementPhysics();
+        if (m_PlayerControls.IsMovementPressed && !IsJumping && !IsInJumpAnimation())
         {
-            Vector3 movementVector = HandleMovementPhysics();
-
-            if (m_PlayerControls.IsMovementPressed)
-            {
-                float speedMultiplier = RunUpdate();
-                yield return coroutineMove(speedMultiplier);
-            }
-            else
-            {
-                m_PlayerControls.CurrentMovement = Vector3.zero;
-            }
-            yield return DetermineMovementAnimationState();
+            float speedMultiplier = RunUpdate();
+            Move(speedMultiplier);
+        }
+        else
+        {
+            m_PlayerControls.CurrentMovement = Vector3.zero;
         }
     }
     private float RunUpdate()
@@ -67,13 +63,44 @@ public class PlayerMovement : AnimationBrain
         }
         return speedMultiplier;
     }
+    private float m_JumpingElapsed = 0.0f;
+    private bool m_IsJumpStarting = false;
+    private void JumpUpdate()
+    {
+        if (IsJumping)
+        {
+            m_JumpingElapsed += Time.deltaTime;
+            m_AppliedMovement.y += m_GravityValue * Time.deltaTime;
+            m_AppliedMovement.y += Mathf.Sqrt(m_JumpHeight * -3.0f * m_GravityValue);
+            m_CharacterController.Move(m_AppliedMovement * Time.deltaTime);
+            return;
+        }
+        if (m_PlayerControls.isJumpPressed && m_CharacterController.isGrounded && !IsJumping && !m_IsJumpStarting)
+        {
+            m_IsJumpStarting = true;
+            ChangeAnimationState(PlayerAnimation.movement.JumpStart);
+        }
+        else if (m_CurrentAnimationState == PlayerAnimation.movement.JumpAir)
+        {
+            m_IsJumpStarting = false;
+            IsJumping = true;
+        }
+    }
     private Vector3 HandleMovementPhysics()
     {
         m_AppliedMovement = m_PlayerControls.CurrentMovement;
         return m_AppliedMovement;
     }
-    private IEnumerator coroutineMove(float speed, bool isLockedOn = false)
+    private bool IsInJumpAnimation()
     {
+        return m_CurrentAnimationState == PlayerAnimation.movement.JumpAir
+            || m_CurrentAnimationState == PlayerAnimation.movement.JumpStart
+            || m_CurrentAnimationState == PlayerAnimation.movement.JumpEnd;
+    }
+
+    private void Move(float speed, bool isLockedOn = false)
+    {
+        if (!m_CharacterController.isGrounded || IsJumping || IsInJumpAnimation()) return;
         Vector3 moveDir = Vector3.zero;
         if (isLockedOn)
         {
@@ -93,7 +120,6 @@ public class PlayerMovement : AnimationBrain
             }
         }
         m_CharacterController.Move(moveDir * m_MovementSpeed * speed * Time.deltaTime);
-        yield return null;
 
     }
     /// <summary>
@@ -107,22 +133,38 @@ public class PlayerMovement : AnimationBrain
     ///         -1
     /// </summary>
     /// <param name="movement">Player input movement vector</param>
-    private IEnumerator DetermineMovementAnimationState(bool isLockedOn = false)
+    private void AnimationUpdate(bool isLockedOn = false)
     {
+        if (m_CurrentAnimationState == PlayerAnimation.movement.JumpStart ||
+            m_CurrentAnimationState == PlayerAnimation.movement.JumpEnd)
+        {
+            return;
+        }
+        if (m_CurrentAnimationState == PlayerAnimation.movement.JumpAir)
+        {
+            if (m_CharacterController.isGrounded && m_JumpingElapsed >= 0.3f)
+            {
+                ChangeAnimationState(PlayerAnimation.movement.JumpEnd);
+                IsJumping = false;
+                m_JumpingElapsed = 0.0f;
+            }
+            return;
+        }
+
         if (m_AppliedMovement == Vector3.zero)
         {
             ChangeAnimationState(PlayerAnimation.movement.Idle);
-            yield break;
+            return;
         }
         if (isLockedOn)
         {
-            yield return coroutineHandleLockedOnMovement(m_AppliedMovement);
+            LockedOnMovementUpdate(m_AppliedMovement);
         }
         else
         {
-            yield return coroutineHandleNormalMovement(m_AppliedMovement);
+            NormalMovementUpdate(m_AppliedMovement);
         }
-        IEnumerator coroutineHandleLockedOnMovement(Vector3 movement)
+        void LockedOnMovementUpdate(Vector3 movement)
         {
             if (movement.x > 0f && movement.z == 0f)
             {
@@ -140,9 +182,8 @@ public class PlayerMovement : AnimationBrain
             {
                 ChangeAnimationState(PlayerAnimation.movement.WalkBack);
             }
-            yield return null;
         }
-        IEnumerator coroutineHandleNormalMovement(Vector3 movement)
+        void NormalMovementUpdate(Vector3 movement)
         {
             if (m_PlayerControls.isRunPressed)
             {
@@ -152,7 +193,6 @@ public class PlayerMovement : AnimationBrain
             {
                 ChangeAnimationState(PlayerAnimation.movement.WalkFront);
             }
-            yield return null;
         }
     }
 }

@@ -9,5 +9,8 @@ public class PlayerAnimation
         public string WalkLeft = "Walk Left";
         public string WalkRight = "Walk Right";
         public string Run = "Run";
+        public string JumpStart = "Jump Start";
+        public string JumpAir = "Jump Air";
+        public string JumpEnd = "Jump End";
     }
 }
